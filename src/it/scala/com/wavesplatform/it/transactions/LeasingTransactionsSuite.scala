@@ -2,6 +2,7 @@ package com.wavesplatform.it.transactions
 
 import com.wavesplatform.it.util._
 import org.scalatest.CancelAfterFailure
+import play.api.libs.json.Json
 
 import scala.concurrent.Await
 import scala.concurrent.Future.traverse
@@ -136,6 +137,29 @@ class LeasingTransactionsSuite extends BaseTransactionSuite with CancelAfterFail
 
       _ <- assertBalances(firstAddress, 65.waves, 50.waves)
     } yield transferFailureAssertion
+
+    Await.result(f, waitCompletion)
+  }
+
+  test("canceled flag is set correctly for lease transactions") {
+    def txCanceled(txId: String) = sender.get(s"/transactions/info/$txId").map { r =>
+      (Json.parse(r.getResponseBody) \ "canceled").as[Boolean]
+    }
+
+    val f = for {
+      _ <- assertBalances(firstAddress, 65.waves, 50.waves)
+        .zip(assertBalances(secondAddress, 100.waves, 115.waves))
+
+      createdLeaseTxId <- sender.lease(firstAddress, secondAddress, 5.waves, fee = 5.waves).map(_.id)
+      _ <- waitForHeightAraiseAndTxPresent(createdLeaseTxId, 1)
+      canceled1 <- txCanceled(createdLeaseTxId)
+      _ = assert(! canceled1)
+
+      createdCancelLeaseTxId <- sender.cancelLease(firstAddress, createdLeaseTxId, fee = 5.waves).map(_.id)
+      _ <- waitForHeightAraiseAndTxPresent(createdCancelLeaseTxId, 1)
+      canceled2 <- txCanceled(createdLeaseTxId)
+      _ = assert(canceled2)
+    } yield succeed
 
     Await.result(f, waitCompletion)
   }
